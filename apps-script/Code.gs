@@ -181,6 +181,8 @@ function getWeekEvents() {
   var cals = (Calendar.CalendarList.list({ minAccessRole: "owner" }).items) || [];
   var rows = [];
   cals.forEach(function (cal) {
+    var color = cal.backgroundColor || "#4a90d9"; // the calendar's own color
+    var name = cal.summaryOverride || cal.summary || "";
     var resp = Calendar.Events.list(cal.id, {
       timeMin: start.toISOString(),
       timeMax: end.toISOString(),
@@ -192,7 +194,7 @@ function getWeekEvents() {
       var st = ev.start || {};
       var allDay = !!st.date; // all-day events carry 'date'; timed carry 'dateTime'
       var when = new Date(st.dateTime || (st.date + "T00:00:00"));
-      rows.push({ ev: ev, when: when, allDay: allDay });
+      rows.push({ ev: ev, when: when, allDay: allDay, color: color, cal: name });
     });
   });
   rows.sort(function (a, b) { return a.when - b.when; });
@@ -203,6 +205,8 @@ function getWeekEvents() {
       date: Utilities.formatDate(r.when, tz, "MMM d"),
       time: r.allDay ? "" : Utilities.formatDate(r.when, tz, "h:mm a"),
       start: r.when.toISOString(),
+      color: r.color,
+      cal: r.cal,
     };
   });
 }
