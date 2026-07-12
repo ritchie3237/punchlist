@@ -184,9 +184,15 @@ function handleQuickAdd(d) {
   if (!text) return jsonOut({ ok: false, error: "Empty text" });
 
   var parsed = null;
+  var parseErr = "";
   try {
     parsed = parseWithClaude(text);
+    if (parsed && parsed._err) {
+      parseErr = parsed._err;
+      parsed = null;
+    }
   } catch (err) {
+    parseErr = String(err);
     parsed = null; // never lose the input — fall through to raw add
   }
 
@@ -200,7 +206,7 @@ function handleQuickAdd(d) {
     var id = appendTask(text, "Other", "open", "quickadd", "unparsed", "");
     added.push({ id: id, title: text, category: "Other", due: "" });
   }
-  return jsonOut({ ok: true, added: added, parsed: !!parsed });
+  return jsonOut({ ok: true, added: added, parsed: !!parsed, parse_error: parseErr });
 }
 
 function handleUpdate(d) {
@@ -244,7 +250,7 @@ function normTitle(s) {
 
 function parseWithClaude(text) {
   var key = PropertiesService.getScriptProperties().getProperty("ANTHROPIC_API_KEY");
-  if (!key) return null;
+  if (!key) return { _err: "no ANTHROPIC_API_KEY script property found" };
 
   var tz = Session.getScriptTimeZone();
   var today = Utilities.formatDate(new Date(), tz, "EEEE, MMMM d, yyyy");
@@ -293,7 +299,9 @@ function parseWithClaude(text) {
     muteHttpExceptions: true,
   });
 
-  if (res.getResponseCode() !== 200) return null;
+  if (res.getResponseCode() !== 200) {
+    return { _err: "API HTTP " + res.getResponseCode() + ": " + res.getContentText().slice(0, 300) };
+  }
   var data = JSON.parse(res.getContentText());
 
   if (data.usage) {
