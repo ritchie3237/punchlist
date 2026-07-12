@@ -46,6 +46,7 @@
     max-width: 640px; margin: 0 auto;
   }
   #quote { font-style: italic; color: var(--muted); font-size: 15px; line-height: 1.4; display: none; margin-bottom: 8px; }
+  #quote .qa { font-style: normal; white-space: nowrap; }
   h1 { font-size: 22px; letter-spacing: -0.02em; }
   h1 span { color: var(--accent); }
 
@@ -204,8 +205,13 @@ function fmtDue(due) {
 }
 
 function render() {
-  // quote slot (parked feature — renders when backend supplies one)
-  if (state.quote) { $("quote").textContent = "“" + state.quote + "”"; $("quote").style.display = "block"; }
+  // daily rotating quote (backend supplies {t, a}); tolerate a bare string too
+  if (state.quote) {
+    var qt = typeof state.quote === "string" ? state.quote : state.quote.t;
+    var qa = state.quote && state.quote.a ? state.quote.a : "";
+    $("quote").innerHTML = "“" + esc(qt) + "”" + (qa ? ' <span class="qa">—' + esc(qa) + "</span>" : "");
+    $("quote").style.display = "block";
+  }
 
   var inbox = state.tasks.filter(function (t) { return t.status === "inbox"; });
   var badge = $("inbox-badge");

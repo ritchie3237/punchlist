@@ -26,6 +26,34 @@ var CATEGORIES = ["House", "Errands", "Family", "Health", "Admin", "Other"];
 var PRICE_IN_PER_MTOK = 1.0;
 var PRICE_OUT_PER_MTOK = 5.0;
 
+// Daily rotating header quote (Ritchie-approved list). One is shown per day
+// (by day-of-year), stable within a day, cycling through the list.
+var QUOTES = [
+  { t: "We are what we repeatedly do. Excellence, then, is not an act, but a habit.", a: "Will Durant" },
+  { t: "It is not that we have a short time to live, but that we waste a lot of it.", a: "Seneca" },
+  { t: "You have power over your mind — not outside events. Realize this, and you will find strength.", a: "Marcus Aurelius" },
+  { t: "How we spend our days is, of course, how we spend our lives.", a: "Annie Dillard" },
+  { t: "You do not rise to the level of your goals. You fall to the level of your systems.", a: "James Clear" },
+  { t: "Every action you take is a vote for the type of person you wish to become.", a: "James Clear" },
+  { t: "A year from now you may wish you had started today.", a: "Karen Lamb" },
+  { t: "Knowing is not enough; we must apply. Willing is not enough; we must do.", a: "Johann Wolfgang von Goethe" },
+  { t: "The successful warrior is the average man, with laser-like focus.", a: "Bruce Lee" },
+  { t: "The journey of a thousand miles begins with a single step.", a: "Lao Tzu" },
+  { t: "Whether you think you can or you think you can’t, you’re right.", a: "Henry Ford" },
+  { t: "Patience and perseverance have a magical effect before which difficulties disappear.", a: "John Quincy Adams" },
+  { t: "Success is the sum of small efforts repeated day in and day out.", a: "Robert Collier" },
+  { t: "The best time to plant a tree was 20 years ago. The second best time is now.", a: "Proverb" },
+  { t: "Simplicity is the ultimate sophistication.", a: "Leonardo da Vinci" },
+  { t: "Act as if what you do makes a difference. It does.", a: "William James" }
+];
+
+function getDailyQuote() {
+  var now = new Date();
+  var start = new Date(now.getFullYear(), 0, 0);
+  var doy = Math.floor((now - start) / 86400000);
+  return QUOTES[doy % QUOTES.length];
+}
+
 // ---------------------------------------------------------------- sheet access
 
 function getSpreadsheet() {
@@ -125,7 +153,7 @@ function statePayload() {
     }),
     week: getWeekEvents(),
     usage: { month_cost_usd: monthToDateCost() },
-    quote: null, // parked: daily inspirational quote slot
+    quote: getDailyQuote(),
   };
 }
 
@@ -134,7 +162,7 @@ function widgetPayload() {
   var inboxCount = readTasks().filter(function (t) { return t.status === "inbox"; }).length;
   return {
     ok: true,
-    quote: null,
+    quote: getDailyQuote(),
     inbox_count: inboxCount,
     tasks: open.slice(0, 12).map(function (t) {
       return { id: t.id, title: t.title, category: t.category, due: t.due };
