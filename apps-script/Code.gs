@@ -249,7 +249,10 @@ function normTitle(s) {
 // ---------------------------------------------------------------- Claude quick-add parsing
 
 function parseWithClaude(text) {
-  var key = PropertiesService.getScriptProperties().getProperty("ANTHROPIC_API_KEY");
+  // Accept common casings — Google's settings UI resisted renaming the property.
+  var props = PropertiesService.getScriptProperties();
+  var key = props.getProperty("ANTHROPIC_API_KEY") || props.getProperty("Anthropic_API_Key");
+  if (key) key = key.trim();
   if (!key) return { _err: "no ANTHROPIC_API_KEY script property found" };
 
   var tz = Session.getScriptTimeZone();
@@ -311,11 +314,11 @@ function parseWithClaude(text) {
     getUsageSheet().appendRow([new Date(), data.usage.input_tokens, data.usage.output_tokens, cost]);
   }
 
-  if (data.stop_reason === "refusal") return null;
+  if (data.stop_reason === "refusal") return { _err: "refusal" };
   var textBlock = (data.content || []).filter(function (b) { return b.type === "text"; })[0];
-  if (!textBlock) return null;
+  if (!textBlock) return { _err: "no text block in response" };
   var out = JSON.parse(textBlock.text);
-  if (!out.tasks || !out.tasks.length) return null;
+  if (!out.tasks || !out.tasks.length) return { _err: "no tasks in parsed output" };
   return out;
 }
 
