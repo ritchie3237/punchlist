@@ -288,7 +288,7 @@ function dailyEmailHarvest() {
     processed = [];
   }
 
-  var threads = GmailApp.search("in:inbox category:primary newer_than:2d", 0, 30);
+  var threads = GmailApp.search("in:inbox category:primary newer_than:7d", 0, 50);
   var fresh = threads.filter(function (th) {
     return processed.indexOf(th.getId()) < 0;
   });
