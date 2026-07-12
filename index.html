@@ -242,11 +242,13 @@ function renderWeek() {
   if (!state.week.length) return '<div class="empty">Nothing on the calendar this week.</div>';
   return state.week.map(function (ev) {
     var color = ev.color || "var(--line)";
+    // the primary calendar's name is the raw email — show "Personal" instead
+    var calName = ev.cal && ev.cal.indexOf("@") >= 0 ? "Personal" : ev.cal;
     return '<div class="event" style="border-left-color:' + esc(color) + '">' +
       '<div class="when"><div class="d">' + esc(ev.day) + " " + esc(ev.date) +
       '</div><div class="t">' + (ev.time ? esc(ev.time) : "all day") + '</div></div>' +
       '<div class="ev-body"><div class="name">' + esc(ev.title) + "</div>" +
-      (ev.cal ? '<div class="cal">' + esc(ev.cal) + "</div>" : "") + "</div></div>";
+      (calName ? '<div class="cal">' + esc(calName) + "</div>" : "") + "</div></div>";
   }).join("");
 }
 
