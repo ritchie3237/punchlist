@@ -1,6 +1,6 @@
 {
-  "name": "Punchlist",
-  "short_name": "Punchlist",
+  "name": "Docket",
+  "short_name": "Docket",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#101614",
