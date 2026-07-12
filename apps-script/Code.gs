@@ -117,9 +117,8 @@ function widgetPayload() {
 function getWeekEvents() {
   var tz = Session.getScriptTimeZone();
   var now = new Date();
-  // Monday 00:00 of the current week → next Monday
-  var day = (now.getDay() + 6) % 7; // Mon=0 … Sun=6
-  var start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
+  // rolling window: start of today → 7 days out
+  var start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   var end = new Date(start.getTime() + 7 * 24 * 3600 * 1000);
   // "My calendars" only: every calendar Ritchie owns, not subscribed/other calendars.
   var cals = CalendarApp.getAllCalendars().filter(function (c) {
