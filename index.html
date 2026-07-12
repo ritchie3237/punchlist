@@ -82,6 +82,8 @@
   .task.done-anim .check, .task .check.checked { background: var(--accent); border-color: var(--accent); color: #fff; }
   .task .body { flex: 1; min-width: 0; }
   .task .title { font-size: 16px; line-height: 1.3; overflow-wrap: break-word; }
+  .task .title[contenteditable] { outline: none; }
+  .task .title.editing { border-bottom: 2px solid var(--accent); padding-bottom: 2px; }
   .task.done-anim .title { text-decoration: line-through; color: var(--muted); }
   .task .meta { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
   .task .due { color: var(--accent); font-weight: 600; }
@@ -254,7 +256,7 @@ function renderList() {
     html += byCat[cat].map(function (t) {
       return '<div class="task" data-id="' + t.id + '">' +
         '<button class="check" data-act="done" aria-label="Complete">✓</button>' +
-        '<div class="body"><div class="title">' + esc(t.title) + "</div>" +
+        '<div class="body"><div class="title" data-edit="1">' + esc(t.title) + "</div>" +
         (t.due ? '<div class="meta"><span class="due">' + fmtDue(t.due) + "</span></div>" : "") +
         "</div></div>";
     }).join("");
@@ -297,6 +299,38 @@ function bindTaskButtons() {
       post({ action: "update", id: id, status: status }).then(function (r) {
         if (!r.ok) { task.status = prev; render(); toast("Update failed"); }
       }).catch(function () { task.status = prev; render(); toast("Update failed"); });
+    };
+  });
+
+  // Tap a List title to edit it in place; Enter or blur saves, Escape cancels.
+  document.querySelectorAll('.title[data-edit]').forEach(function (el) {
+    el.onclick = function () {
+      if (el.isContentEditable) return;
+      var id = el.closest(".task").dataset.id;
+      var task = state.tasks.find(function (t) { return t.id === id; });
+      if (!task) return;
+      var original = task.title;
+      el.contentEditable = "true";
+      el.classList.add("editing");
+      el.focus();
+      document.execCommand && document.execCommand("selectAll", false, null);
+
+      function finish(save) {
+        el.contentEditable = "false";
+        el.classList.remove("editing");
+        var next = el.textContent.trim();
+        if (!save || !next || next === original) { el.textContent = original; return; }
+        task.title = next;
+        el.textContent = next;
+        post({ action: "edit", id: id, title: next }).then(function (r) {
+          if (!r.ok) { task.title = original; el.textContent = original; toast("Edit failed"); }
+        }).catch(function () { task.title = original; el.textContent = original; toast("Edit failed"); });
+      }
+      el.onkeydown = function (e) {
+        if (e.key === "Enter") { e.preventDefault(); finish(true); el.blur(); }
+        else if (e.key === "Escape") { e.preventDefault(); finish(false); el.blur(); }
+      };
+      el.onblur = function () { if (el.isContentEditable) finish(true); };
     };
   });
 }

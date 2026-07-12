@@ -192,6 +192,7 @@ function doPost(e) {
     var d = JSON.parse(e.postData.contents);
     if (d.action === "quickadd") return handleQuickAdd(d);
     if (d.action === "update") return handleUpdate(d);
+    if (d.action === "edit") return handleEdit(d);
     if (d.action === "add_inbox") return handleAddInbox(d);
     if (d.action === "harvest_email") return jsonOut(dailyEmailHarvest());
     return jsonOut({ ok: false, error: "Unknown action" });
@@ -243,6 +244,24 @@ function handleUpdate(d) {
       sheet
         .getRange(tasks[i]._row, TASK_HEADERS.indexOf("completed_at") + 1)
         .setValue(d.status === "done" ? new Date() : "");
+      return jsonOut({ ok: true });
+    }
+  }
+  return jsonOut({ ok: false, error: "Task not found" });
+}
+
+// Edit a task's title (and optionally due date) in place.
+function handleEdit(d) {
+  var title = String(d.title || "").trim();
+  if (!title) return jsonOut({ ok: false, error: "Empty title" });
+  var tasks = readTasks();
+  for (var i = 0; i < tasks.length; i++) {
+    if (tasks[i].id === d.id) {
+      var sheet = getTasksSheet();
+      sheet.getRange(tasks[i]._row, TASK_HEADERS.indexOf("title") + 1).setValue(title.slice(0, 300));
+      if (typeof d.due === "string") {
+        sheet.getRange(tasks[i]._row, TASK_HEADERS.indexOf("due") + 1).setValue(d.due);
+      }
       return jsonOut({ ok: true });
     }
   }
