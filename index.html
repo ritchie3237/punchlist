@@ -199,7 +199,9 @@ function esc(s) {
 
 function fmtDue(due) {
   if (!due) return "";
-  var d = new Date(due + "T12:00:00");
+  // tolerate "YYYY-MM-DD" or a full ISO timestamp (Sheets may coerce dates)
+  var datePart = String(due).slice(0, 10);
+  var d = new Date(datePart + "T12:00:00");
   if (isNaN(d)) return esc(due);
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }

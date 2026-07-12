@@ -1,6 +1,6 @@
 // Punchlist service worker — cache the app shell, always hit the network for data.
 // Bump CACHE to deploy shell changes.
-var CACHE = "docket-v4";
+var CACHE = "docket-v5";
 var SHELL = ["index.html", "config.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png", "favicon-32.png"];
 
 self.addEventListener("install", function (e) {
