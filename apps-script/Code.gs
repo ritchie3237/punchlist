@@ -2,13 +2,16 @@
  * Punchlist — self-populating to-do list backend.
  *
  * Endpoints (deploy as Web app: Execute as Me, Anyone has access):
- *  - GET  ?action=state   → all tasks + this week's calendar events + month-to-date API spend
+ *  - GET  ?action=state   → all tasks + next 7 days of calendar events + month-to-date API spend
  *  - GET  ?action=widget  → compact JSON for the Scriptable home-screen widget
  *  - POST {action:"quickadd", text}            → Claude parses sloppy text into task(s), added to List
  *  - POST {action:"update", id, status}        → change a task's status (open/done/dismissed/inbox)
  *  - POST {action:"add_inbox", tasks:[...]}    → harvester drops suggested tasks into the Inbox
+ *  - POST {action:"harvest_email"}             → run the Gmail scan now (also runs daily via trigger)
  *
- * Setup: store the Anthropic API key under Script Properties as ANTHROPIC_API_KEY.
+ * Setup:
+ *  - Anthropic API key in Script Properties (ANTHROPIC_API_KEY / Anthropic_API_Key).
+ *  - Run setupTriggers() once from the editor to install the daily 7am email harvest.
  * Tabs (Tasks, Usage, Rules) are created automatically on first use.
  */
 
@@ -78,6 +81,26 @@ function appendTask(title, category, status, source, sourceDetail, due) {
     "",
   ]);
   return id;
+}
+
+// Insert suggested tasks into the Inbox, deduping on normalized title vs live tasks.
+function insertInboxTasks(tasks, defaultSource) {
+  var existing = {};
+  readTasks().forEach(function (t) {
+    if (t.status === "inbox" || t.status === "open") existing[normTitle(t.title)] = true;
+  });
+  var added = 0;
+  (tasks || []).forEach(function (t) {
+    if (!t.title || existing[normTitle(t.title)]) return;
+    appendTask(t.title, t.category || "Other", "inbox", t.source || defaultSource || "harvest", t.source_detail || "", t.due || "");
+    existing[normTitle(t.title)] = true;
+    added++;
+  });
+  return added;
+}
+
+function normTitle(s) {
+  return String(s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
 // ---------------------------------------------------------------- GET
@@ -170,6 +193,7 @@ function doPost(e) {
     if (d.action === "quickadd") return handleQuickAdd(d);
     if (d.action === "update") return handleUpdate(d);
     if (d.action === "add_inbox") return handleAddInbox(d);
+    if (d.action === "harvest_email") return jsonOut(dailyEmailHarvest());
     return jsonOut({ ok: false, error: "Unknown action" });
   } catch (err) {
     return jsonOut({ ok: false, error: String(err) });
@@ -226,34 +250,151 @@ function handleUpdate(d) {
 }
 
 function handleAddInbox(d) {
-  // Harvester entry point (phase 2). Dedupes on normalized title vs live tasks.
-  var existing = {};
-  readTasks().forEach(function (t) {
-    if (t.status === "inbox" || t.status === "open") existing[normTitle(t.title)] = true;
-  });
-  var added = 0;
-  (d.tasks || []).forEach(function (t) {
-    if (!t.title || existing[normTitle(t.title)]) return;
-    appendTask(t.title, t.category || "Other", "inbox", t.source || "harvest", t.source_detail || "", t.due || "");
-    existing[normTitle(t.title)] = true;
-    added++;
-  });
+  var added = insertInboxTasks(d.tasks, "harvest");
   return jsonOut({ ok: true, added: added });
 }
 
-function normTitle(s) {
-  return String(s).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+// ---------------------------------------------------------------- Gmail harvest
+
+// Runs daily via time trigger (setupTriggers) and on-demand via POST harvest_email.
+// Scans the primary inbox for mail that needs handling — insurance notifications,
+// bills, renewals, tax/government payment receipts to file — and drops suggested
+// tasks into the Inbox for approval.
+function dailyEmailHarvest() {
+  var props = PropertiesService.getScriptProperties();
+  var processed = [];
+  try {
+    processed = JSON.parse(props.getProperty("PROCESSED_THREADS") || "[]");
+  } catch (e) {
+    processed = [];
+  }
+
+  var threads = GmailApp.search("in:inbox category:primary newer_than:2d", 0, 30);
+  var fresh = threads.filter(function (th) {
+    return processed.indexOf(th.getId()) < 0;
+  });
+  if (!fresh.length) return { ok: true, scanned: 0, added: 0 };
+
+  var tz = Session.getScriptTimeZone();
+  var emails = fresh.map(function (th, i) {
+    var msgs = th.getMessages();
+    var msg = msgs[msgs.length - 1];
+    var body = "";
+    try {
+      body = (msg.getPlainBody() || "").replace(/\s+/g, " ").slice(0, 600);
+    } catch (e) {}
+    return (
+      "EMAIL " + (i + 1) + "\nFrom: " + msg.getFrom() +
+      "\nDate: " + Utilities.formatDate(msg.getDate(), tz, "MMM d") +
+      "\nSubject: " + th.getFirstMessageSubject() +
+      "\nBody: " + body
+    );
+  });
+
+  var schema = {
+    type: "object",
+    properties: {
+      tasks: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Short imperative task, e.g. 'Pay GEICO premium' or 'File: NJ estimated tax receipt'" },
+            category: { type: "string", enum: CATEGORIES },
+            due: { type: "string", description: "YYYY-MM-DD if a deadline is stated, else empty string" },
+            source_detail: { type: "string", description: "Short sender name and date, e.g. 'GEICO · Jul 12'" },
+          },
+          required: ["title", "category", "due", "source_detail"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["tasks"],
+    additionalProperties: false,
+  };
+
+  var system =
+    "You review a day's incoming email for a busy parent and flag ONLY items that need action or filing. " +
+    "Flag: insurance notifications and claims, bills or payments due, tax or government payment receipts " +
+    "(create a 'File: ...' task so they get stored), renewals, deadlines, school/medical items needing a response. " +
+    "Ignore: newsletters, promotions, marketing, social updates, routine shopping receipts, FYI-only mail. " +
+    "Return an empty tasks array if nothing qualifies. One task per flagged email.";
+
+  var out = callClaude(system, emails.join("\n\n"), schema);
+  var added = 0;
+  if (out && !out._err && out.tasks) {
+    added = insertInboxTasks(
+      out.tasks.map(function (t) {
+        t.source = "email";
+        return t;
+      })
+    );
+  }
+
+  // remember processed threads (cap the list so the property stays small)
+  fresh.forEach(function (th) { processed.push(th.getId()); });
+  props.setProperty("PROCESSED_THREADS", JSON.stringify(processed.slice(-300)));
+
+  return { ok: true, scanned: fresh.length, added: added, error: out && out._err ? out._err : "" };
 }
 
-// ---------------------------------------------------------------- Claude quick-add parsing
+// Run this ONCE from the editor to install the daily 7am harvest trigger.
+function setupTriggers() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === "dailyEmailHarvest") ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger("dailyEmailHarvest").timeBased().everyDays(1).atHour(7).create();
+}
 
-function parseWithClaude(text) {
+// ---------------------------------------------------------------- Claude helpers
+
+function getAnthropicKey() {
   // Accept common casings — Google's settings UI resisted renaming the property.
   var props = PropertiesService.getScriptProperties();
   var key = props.getProperty("ANTHROPIC_API_KEY") || props.getProperty("Anthropic_API_Key");
-  if (key) key = key.trim();
+  return key ? key.trim() : null;
+}
+
+// One structured-output call to Haiku. Returns the parsed object, or {_err: "..."}.
+function callClaude(systemPrompt, userContent, schema) {
+  var key = getAnthropicKey();
   if (!key) return { _err: "no ANTHROPIC_API_KEY script property found" };
 
+  var payload = {
+    model: "claude-haiku-4-5",
+    max_tokens: 2048,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userContent }],
+    output_config: { format: { type: "json_schema", schema: schema } },
+  };
+
+  var res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
+    method: "post",
+    contentType: "application/json",
+    headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+
+  if (res.getResponseCode() !== 200) {
+    return { _err: "API HTTP " + res.getResponseCode() + ": " + res.getContentText().slice(0, 300) };
+  }
+  var data = JSON.parse(res.getContentText());
+
+  if (data.usage) {
+    var cost =
+      (data.usage.input_tokens / 1e6) * PRICE_IN_PER_MTOK +
+      (data.usage.output_tokens / 1e6) * PRICE_OUT_PER_MTOK;
+    getUsageSheet().appendRow([new Date(), data.usage.input_tokens, data.usage.output_tokens, cost]);
+  }
+
+  if (data.stop_reason === "refusal") return { _err: "refusal" };
+  var textBlock = (data.content || []).filter(function (b) { return b.type === "text"; })[0];
+  if (!textBlock) return { _err: "no text block in response" };
+  return JSON.parse(textBlock.text);
+}
+
+function parseWithClaude(text) {
   var tz = Session.getScriptTimeZone();
   var today = Utilities.formatDate(new Date(), tz, "EEEE, MMMM d, yyyy");
 
@@ -281,43 +422,14 @@ function parseWithClaude(text) {
     additionalProperties: false,
   };
 
-  var payload = {
-    model: "claude-haiku-4-5",
-    max_tokens: 1024,
-    system:
-      "You turn one sloppy, unstructured note into a clean personal to-do list entry (or several, " +
-      "if the note contains multiple distinct tasks). Today is " + today + ". " +
-      "Keep titles short and imperative. Resolve relative dates like 'saturday' or 'before the 4th' " +
-      "to YYYY-MM-DD. Do not invent tasks that are not in the note.",
-    messages: [{ role: "user", content: text }],
-    output_config: { format: { type: "json_schema", schema: schema } },
-  };
+  var system =
+    "You turn one sloppy, unstructured note into a clean personal to-do list entry (or several, " +
+    "if the note contains multiple distinct tasks). Today is " + today + ". " +
+    "Keep titles short and imperative. Resolve relative dates like 'saturday' or 'before the 4th' " +
+    "to YYYY-MM-DD. Do not invent tasks that are not in the note.";
 
-  var res = UrlFetchApp.fetch("https://api.anthropic.com/v1/messages", {
-    method: "post",
-    contentType: "application/json",
-    headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true,
-  });
-
-  if (res.getResponseCode() !== 200) {
-    return { _err: "API HTTP " + res.getResponseCode() + ": " + res.getContentText().slice(0, 300) };
-  }
-  var data = JSON.parse(res.getContentText());
-
-  if (data.usage) {
-    var cost =
-      (data.usage.input_tokens / 1e6) * PRICE_IN_PER_MTOK +
-      (data.usage.output_tokens / 1e6) * PRICE_OUT_PER_MTOK;
-    getUsageSheet().appendRow([new Date(), data.usage.input_tokens, data.usage.output_tokens, cost]);
-  }
-
-  if (data.stop_reason === "refusal") return { _err: "refusal" };
-  var textBlock = (data.content || []).filter(function (b) { return b.type === "text"; })[0];
-  if (!textBlock) return { _err: "no text block in response" };
-  var out = JSON.parse(textBlock.text);
-  if (!out.tasks || !out.tasks.length) return { _err: "no tasks in parsed output" };
+  var out = callClaude(system, text, schema);
+  if (out && !out._err && (!out.tasks || !out.tasks.length)) return { _err: "no tasks in parsed output" };
   return out;
 }
 
