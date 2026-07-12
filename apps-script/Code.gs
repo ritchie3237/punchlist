@@ -121,7 +121,19 @@ function getWeekEvents() {
   var day = (now.getDay() + 6) % 7; // Mon=0 … Sun=6
   var start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
   var end = new Date(start.getTime() + 7 * 24 * 3600 * 1000);
-  var events = CalendarApp.getDefaultCalendar().getEvents(start, end);
+  // "My calendars" only: every calendar Ritchie owns, not subscribed/other calendars.
+  var cals = CalendarApp.getAllCalendars().filter(function (c) {
+    return c.isOwnedByMe();
+  });
+  var events = [];
+  cals.forEach(function (cal) {
+    cal.getEvents(start, end).forEach(function (ev) {
+      events.push(ev);
+    });
+  });
+  events.sort(function (a, b) {
+    return a.getStartTime() - b.getStartTime();
+  });
   return events.map(function (ev) {
     return {
       title: ev.getTitle(),
