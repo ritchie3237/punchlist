@@ -13,6 +13,11 @@
  *  - Anthropic API key in Script Properties (ANTHROPIC_API_KEY / Anthropic_API_Key).
  *  - Run setupTriggers() once from the editor to install the daily 7am email harvest.
  * Tabs (Tasks, Usage, Rules) are created automatically on first use.
+ *
+ * Least privilege (see appsscript.json oauthScopes): Gmail and Calendar are
+ * READ-ONLY (gmail.readonly / calendar.readonly via the advanced services);
+ * read/write is limited to this bound spreadsheet (spreadsheets.currentonly).
+ * The app is technically incapable of sending, composing, or deleting email.
  */
 
 var CATEGORIES = ["House", "Errands", "Family", "Health", "Admin", "Other"];
@@ -143,26 +148,33 @@ function getWeekEvents() {
   // rolling window: start of today → 7 days out
   var start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   var end = new Date(start.getTime() + 7 * 24 * 3600 * 1000);
-  // "My calendars" only: every calendar Ritchie owns, not subscribed/other calendars.
-  var cals = CalendarApp.getAllCalendars().filter(function (c) {
-    return c.isOwnedByMe();
-  });
-  var events = [];
+  // Read-only via the advanced Calendar service. minAccessRole "owner" =
+  // "My calendars" (calendars Ritchie owns), not subscribed/other calendars.
+  var cals = (Calendar.CalendarList.list({ minAccessRole: "owner" }).items) || [];
+  var rows = [];
   cals.forEach(function (cal) {
-    cal.getEvents(start, end).forEach(function (ev) {
-      events.push(ev);
+    var resp = Calendar.Events.list(cal.id, {
+      timeMin: start.toISOString(),
+      timeMax: end.toISOString(),
+      singleEvents: true,
+      orderBy: "startTime",
+      maxResults: 50,
+    });
+    (resp.items || []).forEach(function (ev) {
+      var st = ev.start || {};
+      var allDay = !!st.date; // all-day events carry 'date'; timed carry 'dateTime'
+      var when = new Date(st.dateTime || (st.date + "T00:00:00"));
+      rows.push({ ev: ev, when: when, allDay: allDay });
     });
   });
-  events.sort(function (a, b) {
-    return a.getStartTime() - b.getStartTime();
-  });
-  return events.map(function (ev) {
+  rows.sort(function (a, b) { return a.when - b.when; });
+  return rows.map(function (r) {
     return {
-      title: ev.getTitle(),
-      day: Utilities.formatDate(ev.getStartTime(), tz, "EEE"),
-      date: Utilities.formatDate(ev.getStartTime(), tz, "MMM d"),
-      time: ev.isAllDayEvent() ? "" : Utilities.formatDate(ev.getStartTime(), tz, "h:mm a"),
-      start: ev.getStartTime().toISOString(),
+      title: r.ev.summary || "(no title)",
+      day: Utilities.formatDate(r.when, tz, "EEE"),
+      date: Utilities.formatDate(r.when, tz, "MMM d"),
+      time: r.allDay ? "" : Utilities.formatDate(r.when, tz, "h:mm a"),
+      start: r.when.toISOString(),
     };
   });
 }
@@ -288,25 +300,38 @@ function dailyEmailHarvest() {
     processed = [];
   }
 
-  var threads = GmailApp.search("in:inbox category:primary newer_than:7d", 0, 50);
-  var fresh = threads.filter(function (th) {
-    return processed.indexOf(th.getId()) < 0;
+  // Read-only via the advanced Gmail service (gmail.readonly scope) — the app is
+  // technically incapable of sending or deleting mail.
+  var listResp = Gmail.Users.Messages.list("me", {
+    q: "in:inbox category:primary newer_than:7d",
+    maxResults: 50,
+  });
+  var msgRefs = (listResp && listResp.messages) || [];
+  var fresh = msgRefs.filter(function (m) {
+    return processed.indexOf(m.id) < 0;
   });
   if (!fresh.length) return { ok: true, scanned: 0, added: 0 };
 
   var tz = Session.getScriptTimeZone();
-  var emails = fresh.map(function (th, i) {
-    var msgs = th.getMessages();
-    var msg = msgs[msgs.length - 1];
-    var body = "";
+  var emails = fresh.slice(0, 40).map(function (m, i) {
+    var full = Gmail.Users.Messages.get("me", m.id, {
+      format: "metadata",
+      metadataHeaders: ["From", "Subject", "Date"],
+    });
+    var h = {};
+    ((full.payload && full.payload.headers) || []).forEach(function (x) {
+      h[x.name.toLowerCase()] = x.value;
+    });
+    var dateStr = "";
     try {
-      body = (msg.getPlainBody() || "").replace(/\s+/g, " ").slice(0, 600);
+      dateStr = h.date ? Utilities.formatDate(new Date(h.date), tz, "MMM d") : "";
     } catch (e) {}
+    var snippet = (full.snippet || "").replace(/\s+/g, " ").slice(0, 400);
     return (
-      "EMAIL " + (i + 1) + "\nFrom: " + msg.getFrom() +
-      "\nDate: " + Utilities.formatDate(msg.getDate(), tz, "MMM d") +
-      "\nSubject: " + th.getFirstMessageSubject() +
-      "\nBody: " + body
+      "EMAIL " + (i + 1) + "\nFrom: " + (h.from || "") +
+      "\nDate: " + dateStr +
+      "\nSubject: " + (h.subject || "") +
+      "\nBody: " + snippet
     );
   });
 
@@ -350,9 +375,9 @@ function dailyEmailHarvest() {
     );
   }
 
-  // remember processed threads (cap the list so the property stays small)
-  fresh.forEach(function (th) { processed.push(th.getId()); });
-  props.setProperty("PROCESSED_THREADS", JSON.stringify(processed.slice(-300)));
+  // remember processed message ids (cap the list so the property stays small)
+  fresh.forEach(function (m) { processed.push(m.id); });
+  props.setProperty("PROCESSED_THREADS", JSON.stringify(processed.slice(-500)));
 
   return { ok: true, scanned: fresh.length, added: added, error: out && out._err ? out._err : "" };
 }
