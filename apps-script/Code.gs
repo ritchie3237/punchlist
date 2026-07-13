@@ -96,12 +96,17 @@ function readTasks() {
     TASK_HEADERS.forEach(function (h, j) {
       t[h] = r[j] instanceof Date ? r[j].toISOString() : r[j];
     });
+    // Sheets stores an all-digit id as a Number; force it back to a string so
+    // client-side and handleUpdate id comparisons match.
+    t.id = String(t.id);
     return t;
   });
 }
 
 function appendTask(title, category, status, source, sourceDetail, due) {
-  var id = Utilities.getUuid().slice(0, 8);
+  // Prefix with a letter so an all-digit slice can't be coerced to a Number by
+  // the sheet (which would break id lookups in the client).
+  var id = "t" + Utilities.getUuid().slice(0, 8);
   getTasksSheet().appendRow([
     id,
     String(title).slice(0, 300),
