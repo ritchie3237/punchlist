@@ -1,84 +1,102 @@
-// Docket — Scriptable home screen widget
+// Docket — Scriptable home screen widget (dark, at-a-glance)
 // Setup (one time, ~3 min):
 //  1. Install "Scriptable" from the App Store.
 //  2. Open Scriptable → "+" → paste this whole file → name it "Docket".
 //  3. Long-press your home screen → "+" → Scriptable → add a LARGE widget.
 //  4. Long-press the new widget → Edit Widget → Script: "Docket".
-// Tapping the widget opens the Docket app. SCRIPT_URL is already filled in.
+// Tapping the widget opens the Docket site (iOS can't launch the home-screen
+// web-app icon directly — that's an Apple limitation, so it opens in Safari).
 
 const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyMkAjcaqufPej-GsFUfpTMDpKnxJdWFjabgt11HOivKBJ3gpwD_ko22eVOca9F08-uUQ/exec";
 const APP_URL = "https://ritchie3237.github.io/punchlist/";
-const MAX_TASKS = 8;
 
-const isDark = Device.isUsingDarkAppearance();
+// Dark palette — matches the Docket site's dark theme.
 const C = {
-  bg: isDark ? new Color("#101614") : new Color("#f6f5f1"),
-  ink: isDark ? new Color("#e8ede9") : new Color("#1c2420"),
-  muted: isDark ? new Color("#8fa197") : new Color("#6b7a72"),
-  accent: isDark ? new Color("#4ade80") : new Color("#157a4b"),
+  bg: new Color("#101614"),
+  ink: new Color("#e8ede9"),
+  muted: new Color("#8fa197"),
+  accent: new Color("#4ade80"),
 };
 
 async function getData() {
   try {
-    const req = new Request(SCRIPT_URL + "?action=widget");
-    return await req.loadJSON();
+    return await new Request(SCRIPT_URL + "?action=state").loadJSON();
   } catch (e) {
     return null;
   }
 }
 
-function line(stack, text, font, color, limit) {
-  const t = stack.addText(text);
+function text(stack, str, font, color, opts) {
+  const t = stack.addText(str);
   t.font = font;
   t.textColor = color;
-  if (limit) t.lineLimit = limit;
+  if (opts && opts.center) t.centerAlignText();
+  if (opts && opts.limit) t.lineLimit = opts.limit;
   return t;
+}
+
+// a centered stat: big number over a small label
+function stat(row, num, label) {
+  const col = row.addStack();
+  col.layoutVertically();
+  const nStk = col.addStack();
+  nStk.addSpacer();
+  text(nStk, String(num), Font.boldSystemFont(40), C.accent);
+  nStk.addSpacer();
+  const lStk = col.addStack();
+  lStk.addSpacer();
+  text(lStk, label, Font.mediumSystemFont(13), C.muted);
+  lStk.addSpacer();
 }
 
 const data = await getData();
 const w = new ListWidget();
 w.backgroundColor = C.bg;
 w.url = APP_URL;
-w.setPadding(16, 18, 14, 18);
+w.setPadding(18, 18, 18, 18);
 
-// daily quote
+// centered "Docket" (Do = accent, cket = ink)
+const titleRow = w.addStack();
+titleRow.addSpacer();
+const title = titleRow.addStack();
+text(title, "Do", Font.boldSystemFont(24), C.accent);
+text(title, "cket", Font.boldSystemFont(24), C.ink);
+titleRow.addSpacer();
+
+// prominent, centered daily quote
 if (data && data.quote && data.quote.t) {
-  const q = w.addText("“" + data.quote.t + "”  —" + (data.quote.a || ""));
-  q.font = Font.italicSystemFont(12);
-  q.textColor = C.muted;
-  q.lineLimit = 3;
-  w.addSpacer(8);
+  w.addSpacer(10);
+  const q = w.addText("“" + data.quote.t + "”");
+  q.font = Font.semiboldSystemFont(15);
+  q.textColor = C.ink;
+  q.centerAlignText();
+  q.lineLimit = 4;
+  if (data.quote.a) {
+    w.addSpacer(3);
+    const a = w.addText("— " + data.quote.a);
+    a.font = Font.mediumSystemFont(12);
+    a.textColor = C.muted;
+    a.centerAlignText();
+  }
 }
 
-// header: Docket + inbox count
-const header = w.addStack();
-header.centerAlignContent();
-const doStk = header.addStack();
-line(doStk, "Do", Font.boldSystemFont(15), C.accent);
-line(doStk, "cket", Font.boldSystemFont(15), C.ink);
-header.addSpacer();
-if (data && data.inbox_count > 0) {
-  line(header, data.inbox_count + " in inbox", Font.mediumSystemFont(12), C.accent);
-}
-w.addSpacer(8);
+w.addSpacer();
 
-if (!data) {
-  line(w, "Couldn’t reach Docket", Font.systemFont(13), C.muted, 2);
-} else if (!data.tasks.length) {
-  line(w, "All clear ✓", Font.systemFont(14), C.muted);
+// counts only (no task list)
+if (!data || !data.tasks) {
+  const r = w.addStack();
+  r.addSpacer();
+  text(r, "Couldn’t reach Docket", Font.systemFont(13), C.muted, { center: true, limit: 2 });
+  r.addSpacer();
 } else {
-  for (const t of data.tasks.slice(0, MAX_TASKS)) {
-    const row = w.addStack();
-    row.centerAlignContent();
-    line(row, "○  ", Font.systemFont(13), C.accent);
-    line(row, t.title, Font.systemFont(13.5), C.ink, 1);
-    row.addSpacer();
-    w.addSpacer(4);
-  }
-  if (data.tasks.length > MAX_TASKS) {
-    w.addSpacer(2);
-    line(w, "+" + (data.tasks.length - MAX_TASKS) + " more", Font.systemFont(12), C.muted);
-  }
+  const open = data.tasks.filter(function (t) { return t.status === "open"; }).length;
+  const inbox = data.tasks.filter(function (t) { return t.status === "inbox"; }).length;
+  const row = w.addStack();
+  row.addSpacer();
+  stat(row, open, open === 1 ? "to-do" : "to-dos");
+  row.addSpacer(40);
+  stat(row, inbox, "in inbox");
+  row.addSpacer();
 }
 
 w.addSpacer();
