@@ -316,7 +316,9 @@ function bindTaskButtons() {
       } else {
         render();
       }
-      post({ action: "update", id: id, status: status }).then(function (r) {
+      // Post task.id (its native type), not the stringified dataset.id — the
+      // backend matches ids with ===, so a numeric row id needs a Number here.
+      post({ action: "update", id: task.id, status: status }).then(function (r) {
         if (!r.ok) { task.status = prev; render(); toast("Update failed"); }
       }).catch(function () { task.status = prev; render(); toast("Update failed"); });
     };
@@ -344,7 +346,7 @@ function bindTaskButtons() {
         if (!save || !next || next === original) { el.textContent = original; return; }
         task.title = next;
         el.textContent = next;
-        post({ action: "edit", id: id, title: next }).then(function (r) {
+        post({ action: "edit", id: task.id, title: next }).then(function (r) {
           if (!r.ok) { task.title = original; el.textContent = original; toast("Edit failed"); }
         }).catch(function () { task.title = original; el.textContent = original; toast("Edit failed"); });
       }
