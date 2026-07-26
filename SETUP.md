@@ -15,7 +15,7 @@ are yours; everything else is already wired up.
 3. **Paste the code.** Delete the placeholder and paste the full contents of
    [`apps-script/Code.gs`](apps-script/Code.gs). Save (Cmd+S).
 
-4. **Add your Anthropic API key** (powers the sloppy-text quick-add):
+4. **Add your Anthropic API key** (powers the daily email/Inbox harvest):
    - Get a key at [console.anthropic.com](https://console.anthropic.com) →
      API Keys → Create Key. Name it `punchlist` and use it nowhere else, so
      the in-app spend number stays exact.

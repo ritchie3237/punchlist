@@ -1,9 +1,10 @@
 # Punchlist
 
 A self-populating personal to-do PWA. Tasks are harvested daily from texts-to-self,
-Apple Reminders, and Google Calendar into a review **Inbox**; sloppy quick-add text is
-structured into clean tasks by Claude (Haiku); everything lives in a Google Sheet
-behind a Google Apps Script web app.
+Apple Reminders, and Google Calendar into a review **Inbox** (structured by Claude
+Haiku); quick-add text you type is stored verbatim as a task — exactly as written,
+never reworded or split. Everything lives in a Google Sheet behind a Google Apps
+Script web app.
 
 - **App:** https://ritchie3237.github.io/punchlist/
 - **Backend:** [apps-script/Code.gs](apps-script/Code.gs) — deploy per [SETUP.md](SETUP.md)
