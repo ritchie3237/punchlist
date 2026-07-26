@@ -4,7 +4,7 @@
  * Endpoints (deploy as Web app: Execute as Me, Anyone has access):
  *  - GET  ?action=state   → all tasks + next 7 days of calendar events + month-to-date API spend
  *  - GET  ?action=widget  → compact JSON for the Scriptable home-screen widget
- *  - POST {action:"quickadd", text}            → Claude parses sloppy text into task(s), added to List
+ *  - POST {action:"quickadd", text}            → adds the text verbatim as one task on the List
  *  - POST {action:"update", id, status}        → change a task's status (open/done/dismissed/inbox)
  *  - POST {action:"add_inbox", tasks:[...]}    → harvester drops suggested tasks into the Inbox
  *  - POST {action:"harvest_email"}             → run the Gmail scan now (also runs daily via trigger)
@@ -256,30 +256,12 @@ function handleQuickAdd(d) {
   var text = String(d.text || "").trim();
   if (!text) return jsonOut({ ok: false, error: "Empty text" });
 
-  var parsed = null;
-  var parseErr = "";
-  try {
-    parsed = parseWithClaude(text);
-    if (parsed && parsed._err) {
-      parseErr = parsed._err;
-      parsed = null;
-    }
-  } catch (err) {
-    parseErr = String(err);
-    parsed = null; // never lose the input — fall through to raw add
-  }
-
-  var added = [];
-  if (parsed && parsed.tasks && parsed.tasks.length) {
-    parsed.tasks.forEach(function (t) {
-      var id = appendTask(t.title, t.category, "open", "quickadd", "", t.due || "");
-      added.push({ id: id, title: t.title, category: t.category, due: t.due || "" });
-    });
-  } else {
-    var id = appendTask(text, "Other", "open", "quickadd", "unparsed", "");
-    added.push({ id: id, title: text, category: "Other", due: "" });
-  }
-  return jsonOut({ ok: true, added: added, parsed: !!parsed, parse_error: parseErr });
+  // Store the reminder exactly as typed. No LLM rewriting, so nothing gets
+  // dropped, reworded, or split — what you type is what lands on the List.
+  // Category defaults to "Other"; recategorize or set a due date in the app.
+  var id = appendTask(text, "Other", "open", "quickadd", "", "");
+  var added = [{ id: id, title: text, category: "Other", due: "" }];
+  return jsonOut({ ok: true, added: added });
 }
 
 function handleUpdate(d) {
@@ -473,45 +455,6 @@ function callClaude(systemPrompt, userContent, schema) {
   var textBlock = (data.content || []).filter(function (b) { return b.type === "text"; })[0];
   if (!textBlock) return { _err: "no text block in response" };
   return JSON.parse(textBlock.text);
-}
-
-function parseWithClaude(text) {
-  var tz = Session.getScriptTimeZone();
-  var today = Utilities.formatDate(new Date(), tz, "EEEE, MMMM d, yyyy");
-
-  var schema = {
-    type: "object",
-    properties: {
-      tasks: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            title: { type: "string", description: "Short imperative task title, cleaned up" },
-            category: { type: "string", enum: CATEGORIES },
-            due: {
-              type: "string",
-              description: "Due date as YYYY-MM-DD if one is stated or implied, else empty string",
-            },
-          },
-          required: ["title", "category", "due"],
-          additionalProperties: false,
-        },
-      },
-    },
-    required: ["tasks"],
-    additionalProperties: false,
-  };
-
-  var system =
-    "You turn one sloppy, unstructured note into a clean personal to-do list entry (or several, " +
-    "if the note contains multiple distinct tasks). Today is " + today + ". " +
-    "Keep titles short and imperative. Resolve relative dates like 'saturday' or 'before the 4th' " +
-    "to YYYY-MM-DD. Do not invent tasks that are not in the note.";
-
-  var out = callClaude(system, text, schema);
-  if (out && !out._err && (!out.tasks || !out.tasks.length)) return { _err: "no tasks in parsed output" };
-  return out;
 }
 
 // ---------------------------------------------------------------- util
